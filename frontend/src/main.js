@@ -24,7 +24,7 @@ let currentGifFrameIndex = 0;
 let gifTimer = null;
 let currentGifFrames = [];
 
-// Zoom & Pan State
+// Zoom & Pan State (Full Screen Mode)
 let zoomLevel = 1.0;
 let panX = 0;
 let panY = 0;
@@ -183,10 +183,12 @@ function bindEvents() {
     // Keyboard Shortcuts
     window.onkeydown = handleGlobalKeyDown;
 
-    // Mouse Zoom & Pan in Preview Viewport
-    const viewport = document.getElementById('preview-viewport');
-    viewport.onwheel = handleWheelZoom;
-    viewport.onmousedown = handlePanStart;
+    // Mouse Zoom & Pan strictly in Full Screen Overlay
+    const fsOverlay = document.getElementById('fullscreen-overlay');
+
+    fsOverlay.onwheel = handleWheelZoom;
+    fsOverlay.onmousedown = handlePanStart;
+
     window.onmousemove = handlePanMove;
     window.onmouseup = handlePanEnd;
 }
@@ -208,6 +210,7 @@ async function loadDrives() {
         driveSelect.innerHTML = drives.map(d => `<option value="${escapeHtml(d.path)}">${escapeHtml(d.label)}</option>`).join('');
 
         if (drives.length > 0) {
+            driveSelect.value = drives[0].path;
             navigateToFolder(drives[0].path);
         }
     } catch (err) {
@@ -215,10 +218,25 @@ async function loadDrives() {
     }
 }
 
+// Get Currently Selected Drive Object
+function getSelectedDrivePath() {
+    const driveSelect = document.getElementById('drive-select');
+    return driveSelect ? driveSelect.value : (drives[0] ? drives[0].path : '');
+}
+
 // Directory Navigation & Tree Rendering
 async function navigateToFolder(dirPath) {
     currentPath = dirPath;
     document.getElementById('path-input').value = dirPath;
+
+    // Synchronize drive select dropdown if needed
+    const driveSelect = document.getElementById('drive-select');
+    if (driveSelect && drives.length > 0) {
+        const matchingDrive = drives.find(d => dirPath.toLowerCase().startsWith(d.path.toLowerCase()));
+        if (matchingDrive && driveSelect.value !== matchingDrive.path) {
+            driveSelect.value = matchingDrive.path;
+        }
+    }
 
     // Expand tree path
     treeExpandedPaths.add(dirPath);
@@ -228,12 +246,11 @@ async function navigateToFolder(dirPath) {
 
 async function renderTree() {
     const rootEl = document.getElementById('tree-root');
-    if (drives.length === 0) return;
+    const selectedDrivePath = getSelectedDrivePath();
+    if (!selectedDrivePath) return;
 
-    let html = '';
-    for (const drive of drives) {
-        html += await renderTreeNodeHTML(drive.path, drive.label, 0);
-    }
+    const drive = drives.find(d => d.path === selectedDrivePath) || { path: selectedDrivePath, label: selectedDrivePath };
+    let html = await renderTreeNodeHTML(drive.path, drive.label, 0);
     rootEl.innerHTML = html;
 
     // Bind click events on tree nodes
@@ -317,13 +334,34 @@ async function loadDirectoryFiles(dirPath) {
     }
 }
 
-// Render Thumbnails Grid
+// Render Thumbnails Grid & Lazy Load
+let thumbObserver = null;
+
 function renderThumbnails() {
     const grid = document.getElementById('thumb-grid');
     if (files.length === 0) {
         grid.innerHTML = `<div style="grid-column: 1 / -1; color: #666; font-size: 13px; padding: 20px; text-align: center;">No matching files in this directory</div>`;
         return;
     }
+
+    // Clean up previous IntersectionObserver
+    if (thumbObserver) {
+        thumbObserver.disconnect();
+    }
+
+    // Lazy Loading Observer using IntersectionObserver
+    thumbObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                const card = entry.target;
+                const idx = parseInt(card.dataset.index, 10);
+                if (files[idx]) {
+                    loadThumbnailImage(files[idx], idx);
+                }
+                thumbObserver.unobserve(card);
+            }
+        });
+    }, { root: grid, rootMargin: '100px' });
 
     grid.innerHTML = files.map((file, idx) => {
         const isHighlighted = (idx === highlightedIndex);
@@ -333,31 +371,36 @@ function renderThumbnails() {
         if (file.isGif) icon = '🎞️';
         else if (file.extension === 'ico') icon = '💠';
 
+        // Check if cached image is already available
+        const cachedUrl = fileDataCache.get(file.path);
+        const imgContent = cachedUrl
+            ? `<img src="${cachedUrl}" class="thumb-img" alt="${escapeHtml(file.name)}" draggable="false" />`
+            : `<div class="thumb-icon-placeholder">${icon}</div>`;
+
         return `
             <div class="thumb-card ${isHighlighted ? 'highlighted' : ''} ${isSelected ? 'selected' : ''}"
                  data-index="${idx}" id="thumb-card-${idx}">
                 <div class="thumb-img-wrapper" id="thumb-img-wrapper-${idx}">
-                    <div class="thumb-icon-placeholder">${icon}</div>
+                    ${imgContent}
                 </div>
                 <div class="thumb-label" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</div>
             </div>
         `;
-    }).map((html, idx) => {
-        // Load thumbnail image asynchronously
-        loadThumbnailImage(files[idx], idx);
-        return html;
     }).join('');
 
-    // Bind click events on thumbnail cards
+    // Attach IntersectionObserver and Click/DblClick events
     grid.querySelectorAll('.thumb-card').forEach(card => {
-        card.onclick = (e) => {
-            const idx = parseInt(card.dataset.index, 10);
+        const idx = parseInt(card.dataset.index, 10);
+        const file = files[idx];
 
+        if (file && !fileDataCache.has(file.path)) {
+            thumbObserver.observe(card);
+        }
+
+        card.onclick = (e) => {
             if (e.ctrlKey || e.metaKey) {
-                // Ctrl+Click toggles selection
                 toggleSelectionIndex(idx);
             } else if (e.shiftKey && highlightedIndex >= 0) {
-                // Shift+Click selects range
                 const start = Math.min(highlightedIndex, idx);
                 const end = Math.max(highlightedIndex, idx);
                 for (let i = start; i <= end; i++) {
@@ -368,11 +411,18 @@ function renderThumbnails() {
                 updatePreview();
                 updateStatusBar();
             } else {
-                // Normal click highlights single tile
                 highlightedIndex = idx;
                 renderThumbnails();
                 updatePreview();
                 updateStatusBar();
+            }
+        };
+
+        card.ondblclick = (e) => {
+            e.stopPropagation();
+            highlightedIndex = idx;
+            if (!isFullScreen) {
+                toggleFullScreen();
             }
         };
     });
@@ -439,46 +489,6 @@ async function updatePreview() {
     if (isFullScreen) {
         fsImgEl.src = dataUrl;
     }
-
-    // Handle GIF Animation
-    if (file.isGif && isAnimated) {
-        loadAndPlayGif(file);
-    }
-}
-
-// GIF Handling & Stepping
-async function loadAndPlayGif(file) {
-    let frames = gifFramesCache.get(file.path);
-    if (!frames) {
-        try {
-            frames = await GetGIFFrames(file.path);
-            gifFramesCache.set(file.path, frames);
-        } catch (err) {
-            console.error('Failed to load GIF frames:', err);
-            return;
-        }
-    }
-
-    if (!frames || frames.length === 0) return;
-
-    currentGifFrames = frames;
-    currentGifFrameIndex = 0;
-
-    startGifAnimation();
-}
-
-function startGifAnimation() {
-    stopGifAnimation();
-    if (!currentGifFrames || currentGifFrames.length <= 1 || !isAnimated) return;
-
-    gifTimer = setInterval(() => {
-        currentGifFrameIndex = (currentGifFrameIndex + 1) % currentGifFrames.length;
-        const frameData = currentGifFrames[currentGifFrameIndex];
-        const imgEl = document.getElementById('preview-image');
-        const fsImgEl = document.getElementById('fullscreen-image');
-        if (imgEl) imgEl.src = frameData;
-        if (isFullScreen && fsImgEl) fsImgEl.src = frameData;
-    }, 100); // standard frame rate 100ms
 }
 
 function stopGifAnimation() {
@@ -493,13 +503,11 @@ function toggleAnimate() {
     const btn = document.getElementById('btn-animate');
     if (isAnimated) {
         btn.classList.add('btn-active');
-        if (highlightedIndex >= 0 && files[highlightedIndex]?.isGif) {
-            loadAndPlayGif(files[highlightedIndex]);
-        }
     } else {
         btn.classList.remove('btn-active');
         stopGifAnimation();
     }
+    updatePreview();
 }
 
 async function stepGifFrame(direction) {
@@ -591,26 +599,27 @@ function selectNone() {
     updateStatusBar();
 }
 
-// Zoom & Pan Functions
+// Zoom & Pan Functions (Full Screen Only with Boundary Clamping)
 function handleWheelZoom(e) {
+    if (!isFullScreen) return;
     e.preventDefault();
     const delta = e.deltaY > 0 ? -0.1 : 0.1;
-    zoomLevel = Math.max(0.2, Math.min(5.0, zoomLevel + delta));
-    applyZoomPan();
+    zoomLevel = Math.max(1.0, Math.min(5.0, zoomLevel + delta));
+    clampAndApplyPan();
 }
 
 function handlePanStart(e) {
-    if (e.button !== 0) return; // left click only
+    if (!isFullScreen || e.button !== 0) return; // left click in fullscreen only
     isDragging = true;
     startDragX = e.clientX - panX;
     startDragY = e.clientY - panY;
 }
 
 function handlePanMove(e) {
-    if (!isDragging) return;
+    if (!isFullScreen || !isDragging) return;
     panX = e.clientX - startDragX;
     panY = e.clientY - startDragY;
-    applyZoomPan();
+    clampAndApplyPan();
 }
 
 function handlePanEnd() {
@@ -621,13 +630,35 @@ function resetZoom() {
     zoomLevel = 1.0;
     panX = 0;
     panY = 0;
-    applyZoomPan();
+    clampAndApplyPan();
 }
 
-function applyZoomPan() {
+function clampAndApplyPan() {
+    const fsImgEl = document.getElementById('fullscreen-image');
+    const fsOverlay = document.getElementById('fullscreen-overlay');
+
+    if (fsImgEl && fsOverlay) {
+        if (zoomLevel <= 1.0) {
+            panX = 0;
+            panY = 0;
+        } else {
+            const containerWidth = fsOverlay.clientWidth;
+            const containerHeight = fsOverlay.clientHeight;
+            const imgWidth = fsImgEl.offsetWidth || containerWidth;
+            const imgHeight = fsImgEl.offsetHeight || containerHeight;
+
+            const maxPanX = Math.max(0, (imgWidth * zoomLevel - containerWidth) / 2);
+            const maxPanY = Math.max(0, (imgHeight * zoomLevel - containerHeight) / 2);
+
+            panX = Math.max(-maxPanX, Math.min(maxPanX, panX));
+            panY = Math.max(-maxPanY, Math.min(maxPanY, panY));
+        }
+        fsImgEl.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomLevel})`;
+    }
+
     const imgEl = document.getElementById('preview-image');
     if (imgEl) {
-        imgEl.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomLevel})`;
+        imgEl.style.transform = 'none';
     }
 }
 
@@ -639,10 +670,29 @@ function toggleFullScreen() {
         overlay.style.display = 'flex';
         updatePreview();
         updateFsInfo();
+        // Request browser window / element full screen if supported
+        if (document.documentElement.requestFullscreen) {
+            document.documentElement.requestFullscreen().catch(() => {});
+        } else if (document.documentElement.webkitRequestFullscreen) {
+            document.documentElement.webkitRequestFullscreen().catch(() => {});
+        }
     } else {
         overlay.style.display = 'none';
+        if (document.fullscreenElement && document.exitFullscreen) {
+            document.exitFullscreen().catch(() => {});
+        } else if (document.webkitFullscreenElement && document.webkitExitFullscreen) {
+            document.webkitExitFullscreen().catch(() => {});
+        }
     }
 }
+
+// Listen for native escape / fullscreen change events
+document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement && isFullScreen) {
+        isFullScreen = false;
+        document.getElementById('fullscreen-overlay').style.display = 'none';
+    }
+});
 
 function updateFsInfo() {
     if (highlightedIndex >= 0 && highlightedIndex < files.length) {
@@ -795,15 +845,29 @@ function handleGlobalKeyDown(e) {
         return;
     }
 
-    // Full Screen mode PgUp / PgDn: Next / Prev file
+    // PageUp / PageDown Keys: Always navigate next/prev file in FullScreen mode, or scroll/navigate in normal mode
+    if (e.key === 'PageUp' || e.key === 'PgUp') {
+        e.preventDefault();
+        navigateFile(-1);
+        if (isFullScreen) updateFsInfo();
+        return;
+    }
+    if (e.key === 'PageDown' || e.key === 'PgDn') {
+        e.preventDefault();
+        navigateFile(1);
+        if (isFullScreen) updateFsInfo();
+        return;
+    }
+
+    // Full Screen mode Arrow Keys: Next / Prev file
     if (isFullScreen) {
-        if (e.key === 'PageUp' || e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+        if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
             e.preventDefault();
             navigateFile(-1);
             updateFsInfo();
             return;
         }
-        if (e.key === 'PageDown' || e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
             e.preventDefault();
             navigateFile(1);
             updateFsInfo();
@@ -835,7 +899,6 @@ function handleGlobalKeyDown(e) {
         }
         if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
             e.preventDefault();
-            // Estimate columns in thumbnail grid to move up/down
             const grid = document.getElementById('thumb-grid');
             const colCount = Math.max(1, Math.floor(grid.clientWidth / 120));
             const delta = (e.key === 'ArrowDown') ? colCount : -colCount;
@@ -847,18 +910,6 @@ function handleGlobalKeyDown(e) {
                 updatePreview();
                 updateStatusBar();
             }
-            return;
-        }
-        if (e.key === 'PageUp') {
-            e.preventDefault();
-            const grid = document.getElementById('thumb-grid');
-            grid.scrollTop -= grid.clientHeight;
-            return;
-        }
-        if (e.key === 'PageDown') {
-            e.preventDefault();
-            const grid = document.getElementById('thumb-grid');
-            grid.scrollTop += grid.clientHeight;
             return;
         }
     }

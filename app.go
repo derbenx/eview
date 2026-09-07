@@ -126,26 +126,24 @@ func (a *App) GetDirectories(dirPath string) ([]TreeNode, error) {
 		return nil, fmt.Errorf("failed to read directory: %w", err)
 	}
 
+	// Skip system pseudo-directories on Linux
+	skipDirs := map[string]bool{
+		"proc": true, "sys": true, "dev": true, "run": true,
+	}
+
 	var nodes []TreeNode
 	for _, entry := range entries {
 		if entry.IsDir() {
-			fullPath := filepath.Join(dirPath, entry.Name())
-
-			// Check if it has subdirectories
-			hasChildren := false
-			if subEntries, err := os.ReadDir(fullPath); err == nil {
-				for _, sub := range subEntries {
-					if sub.IsDir() {
-						hasChildren = true
-						break
-					}
-				}
+			name := entry.Name()
+			if dirPath == "/" && skipDirs[name] {
+				continue
 			}
 
+			fullPath := filepath.Join(dirPath, name)
 			nodes = append(nodes, TreeNode{
-				Name:        entry.Name(),
+				Name:        name,
 				Path:        fullPath,
-				HasChildren: hasChildren,
+				HasChildren: true, // Always allow expanding directories
 			})
 		}
 	}

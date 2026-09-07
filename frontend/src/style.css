@@ -52,8 +52,16 @@ body {
 }
 
 .btn-active {
-    background-color: #007acc;
-    border-color: #0098ff;
+    background-color: #007acc !important;
+    border-color: #0098ff !important;
+    color: #ffffff !important;
+    font-weight: bold;
+    box-shadow: 0 0 6px rgba(0, 122, 204, 0.6);
+}
+
+.btn-active:hover {
+    background-color: #0098ff !important;
+    border-color: #33aaff !important;
 }
 
 .separator {
@@ -137,7 +145,8 @@ body {
     min-width: 160px;
     max-width: 45vw;
     resize: horizontal;
-    overflow: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
     background-color: #202020;
     border-right: 1px solid #333;
     display: flex;
@@ -305,11 +314,15 @@ body {
     padding: 12px;
     overflow: hidden;
     position: relative;
+    width: 100%;
+    height: 100%;
 }
 
 .preview-image {
     max-width: 100%;
     max-height: 100%;
+    width: auto;
+    height: auto;
     object-fit: contain;
     transition: transform 0.1s ease-out;
     cursor: grab;
@@ -363,6 +376,8 @@ body {
 .fullscreen-overlay img {
     max-width: 100%;
     max-height: 100%;
+    width: auto;
+    height: auto;
     object-fit: contain;
 }
 
