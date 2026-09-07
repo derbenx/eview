@@ -1,0 +1,41 @@
+AI agent: please ask if you are unsure about anything. Also if the user asks a question, they are looking for an answer not code.
+
+
+Stage 1:
+ layout.htm has the layout for the app.
+ This is a file viewer, stage one focuses on images.
+ jpg, gif and webp
+ file tree, thumbs and preview pane
+ full screen mode
+ step through gif layers
+
+ buttons: Next, Prev, frame fwb/back for gif, Animate (toggle, gif), full screen, select all/none.
+ Checboxes: imgs, gif
+ -Checks toggle if they are shown in the thumbs.
+ Full path bar.
+ file info line at bottom; Width x Height, file size.
+ keys: f/f11 full screen, arrows move selection/pan image, +- zoom, pgup/dn next file in full screen. esc prompt y/n to quit. f2 rename file. space select file.
+ * the select files is for selecting a group of files for next/previous through (or future media playlist). pgup/dn will only flip through (space) selected files in fullscreen or all files if all deselected.
+
+ highlighting is when you use the mouse or arrows to highlight a file. selecting is pressing space to mark a group of them.
+
+Stage 2:
+ stereoscopic options. takes an image that's stereo and converts it via toggled buttons. stereo button turns on feature. User chooses input image type, and output desired. If the input and output match no processing needed for SBS/OU.
+ Buttons: stereo (toggle), input SBS/OU (toggle), output SBS/OU (toggle), swap eyes (toggle), full/half(toggle)
+
+
+Stage 3:
+ media viewer; mp3 oog, wav, mp4
+ play only (spacebar) selected files. The user chooses what files to play via space and then presses play. if no files selected, play file highlighted.
+ buttons: play, stop, speed (slider), frame back/fwd for video. random (toggle), loop (toggle)
+ Checboxes: audio, video
+ Image related buttons disappear if media highlighted. 
+ Only checked file types are display or cycled through in full screen.
+
+Stage 4:
+ 3d viewer; gltf, stl
+ drag to rotate, auto rotate
+ depth/ortho ?
+ wireframe toggle
+ buttons: rotate toggle
+ Checboxes: 3D

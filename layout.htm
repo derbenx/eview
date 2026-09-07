@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EIO - Everything In One</title>
+    <style>
+        /* Reset and layout foundations */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none; /* Prevents text highlighting while dragging splitters */
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #1a1a1a;
+            color: #e0e0e0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* --- 1. TOP BUTTON TOOLBAR --- */
+        .toolbar {
+            background-color: #262626;
+            border-bottom: 1px solid #333;
+            padding: 6px 12px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            height: 42px;
+            z-index: 10;
+        }
+
+        .btn {
+            background-color: #383838;
+            color: #e0e0e0;
+            border: 1px solid #4d4d4d;
+            padding: 4px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .btn:hover {
+            background-color: #4a4a4a;
+            border-color: #666;
+        }
+
+        .btn-active {
+            background-color: #007acc;
+            border-color: #0098ff;
+        }
+
+        .separator {
+            width: 1px;
+            height: 20px;
+            background-color: #444;
+            margin: 0 4px;
+        }
+
+        /* --- MASTER APP WORKSPACE --- */
+        .workspace {
+            flex: 1;
+            display: flex;
+            flex-direction: row;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* --- 2. LEFT SIDE 1/4 SIDEBAR (RESIZABLE HORIZONTALLY) --- */
+        .sidebar-resizable {
+            width: 25vw; /* Fixed to a clean 1/4 starting split layout */
+            min-width: 150px;
+            max-width: 45vw;
+            resize: horizontal;
+            overflow: auto;
+            background-color: #202020;
+            border-right: 1px solid #333;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Scrollbar styling for a cleaner dark look */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track { background: #1a1a1a; }
+        ::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #555; }
+
+        .pane-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #888;
+            padding: 8px 12px;
+            background-color: #1c1c1c;
+            border-bottom: 1px solid #2d2d2d;
+        }
+
+        .tree-root {
+            padding: 8px;
+            font-size: 14px;
+            list-style-type: none;
+        }
+        .tree-node {
+            padding: 4px 6px;
+            cursor: pointer;
+            border-radius: 3px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .tree-node:hover { background-color: #2d2d2d; }
+
+        /* --- 3. RIGHT SIDE MAIN SPACE (VERTICAL 50-50 STACK SPLIT) --- */
+        .main-content {
+            flex: 1;
+            display: grid;
+            grid-template-rows: 1fr 1fr; /* Top/Bottom 50-50 Initial Grid Split */
+            overflow: hidden;
+            background-color: #151515;
+        }
+
+        .pane {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            width: 100%;
+        }
+
+        /* Top 50% Resizable Handle container wrapper */
+        .pane-top-split {
+            border-bottom: 1px solid #333;
+            /* Allows you to drag the bottom border of the thumb grid up and down natively */
+            resize: vertical; 
+            height: 50vh; 
+            min-height: 100px;
+            max-height: 80vh;
+        }
+
+        /* --- TOP HALF: THUMBNAIL LIGHT-TABLE MATRIX --- */
+        .thumb-grid {
+            flex: 1;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+            grid-auto-rows: max-content;
+            gap: 12px;
+            padding: 12px;
+            overflow-y: auto;
+        }
+
+        .thumb-card {
+            background-color: #222;
+            border: 1px solid #333;
+            border-radius: 6px;
+            aspect-ratio: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px;
+            cursor: pointer;
+            text-align: center;
+            position: relative;
+        }
+
+        .thumb-card:hover {
+            border-color: #555;
+            background-color: #2a2a2a;
+        }
+
+        .thumb-card.selected {
+            border-color: #007acc;
+            background-color: #1a2936;
+        }
+
+        .thumb-placeholder {
+            flex: 1;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            color: #666;
+            background-color: #1c1c1c;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .thumb-label {
+            font-size: 11px;
+            margin-top: 6px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            width: 100%;
+            color: #ccc;
+        }
+
+        /* --- BOTTOM HALF: REAL-TIME PREVIEW VIEWPORT PANE --- */
+        .preview-viewport {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #0d0d0d;
+            padding: 16px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .preview-canvas-placeholder {
+            max-width: 100%;
+            max-height: 100%;
+            border: 1px dashed #333;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #555;
+            aspect-ratio: 16/9;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* --- 4. BOTTOM FILE INFO METADATA BAR --- */
+        .info-bar {
+            background-color: #222;
+            border-top: 1px solid #333;
+            height: 26px;
+            padding: 0 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+            color: #aaa;
+            z-index: 10;
+        }
+
+        .info-segment {
+            display: flex;
+            gap: 16px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 1. TOP BUTTON TOOLBAR -->
+    <div class="toolbar">
+        <button class="btn btn-active">Browse</button>
+        <button class="btn">Open External</button>
+        <div class="separator"></div>
+        <button class="btn" onclick="alert('Converting current viewing asset...')">Convert SBS ➔ UO</button>
+        <button class="btn">Toggle 3D Mode</button>
+        <div class="separator"></div>
+        <button class="btn" style="margin-left: auto; background-color: #b33939; border-color: #8c2626;">Exit</button>
+    </div>
+
+    <!-- MASTER APP WORKSPACE -->
+    <div class="workspace">
+        
+        <!-- 2. LEFT SIDE 1/4 SIDEBAR (RESIZABLE VIA HORIZONTAL DRAG IN CORNER/BORDER) -->
+        <div class="sidebar-resizable">
+            <div class="pane-title">Directory Navigation (1/4 Width)</div>
+            <ul class="tree-root">
+                <li>
+                    <div class="tree-node">📁 Storage (C:)</div>
+                    <ul style="padding-left: 16px; list-style-type: none;">
+                        <div class="tree-node">📁 3D_Models</div>
+                        <div class="tree-node">📁 Captures</div>
+                        <div class="tree-node" style="color: #007acc; font-weight: bold;">📁 Media_Workspace</div>
+                    </ul>
+                </li>
+            </ul>
+        </div>
+
+        <!-- 3. RIGHT SIDE MAIN SPACE (STACKED SPLIT: THUMBS ON TOP, PREVIEW ON BOTTOM) -->
+        <div class="main-content">
+            
+            <!-- TOP HALF: THUMBNAIL MATRIX ROW (RESIZABLE VERTICALLY VIA BOTTOM CORNER DRAG) -->
+            <div class="pane pane-top-split">
+                <div class="pane-title">Items Matrix Grid (Top Split)</div>
+                <div class="thumb-grid">
+                    
+                    <!-- 3D Model Thumb Example -->
+                    <div class="thumb-card selected">
+                        <div class="thumb-placeholder">📦</div>
+                        <div class="thumb-label">asset_robot.glb</div>
+                    </div>
+
+                    <!-- WebP Image Thumb Example -->
+                    <div class="thumb-card">
+                        <div class="thumb-placeholder" style="background: radial-gradient(#333, #1c1c1c); color: #007acc;">🖼️</div>
+                        <div class="thumb-label">render_01.webp</div>
+                    </div>
+
+                    <!-- Stereo SBS Asset Example -->
+                    <div class="thumb-card">
+                        <div class="thumb-placeholder">👓</div>
+                        <div class="thumb-label">stereo_sbs.jpg</div>
+                    </div>
+
+                    <!-- Video File Example -->
+                    <div class="thumb-card">
+                        <div class="thumb-placeholder">🎬</div>
+                        <div class="thumb-label">motion_capture.mp4</div>
+                    </div>
+
+                    <!-- Audio File Example -->
+                    <div class="thumb-card">
+                        <div class="thumb-placeholder">🎵</div>
