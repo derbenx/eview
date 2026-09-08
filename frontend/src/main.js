@@ -4,6 +4,7 @@ import {
     GetDirectories,
     GetFilesInDirectory,
     GetFileBase64,
+    GetFileDetails,
     GetGIFFrames,
     RenameFile,
     QuitApp
@@ -63,7 +64,7 @@ function initUI() {
                 <label><input type="checkbox" id="chk-imgs" checked> imgs</label>
                 <label><input type="checkbox" id="chk-gif" checked> gif</label>
                 <label><input type="checkbox" id="chk-ico" checked> ico</label>
-                <label><input type="checkbox" id="chk-all" checked> All</label>
+                <label><input type="checkbox" id="chk-folders" checked> folders</label>
             </div>
         </div>
 
@@ -74,23 +75,29 @@ function initUI() {
         </div>
 
         <!-- MASTER WORKSPACE -->
-        <div class="workspace">
+        <div class="workspace" id="workspace">
             <!-- LEFT SIDEBAR: DIRECTORY TREE -->
-            <div class="sidebar-resizable">
+            <div class="sidebar-resizable" id="sidebar">
                 <div class="pane-title">Folders</div>
                 <ul class="tree-root" id="tree-root"></ul>
             </div>
 
+            <!-- VERTICAL SPLITTER BAR -->
+            <div class="splitter-vertical" id="splitter-v" title="Drag to resize folder sidebar"></div>
+
             <!-- RIGHT MAIN CONTENT -->
-            <div class="main-content">
+            <div class="main-content" id="main-content">
                 <!-- TOP HALF: THUMBNAIL MATRIX -->
-                <div class="pane-top-split">
+                <div class="pane-top-split" id="pane-top">
                     <div class="pane-title" id="thumb-pane-title">Thumbnails</div>
                     <div class="thumb-grid" id="thumb-grid"></div>
                 </div>
 
+                <!-- HORIZONTAL SPLITTER BAR -->
+                <div class="splitter-horizontal" id="splitter-h" title="Drag to resize preview pane"></div>
+
                 <!-- BOTTOM HALF: PREVIEW VIEWPORT -->
-                <div class="preview-pane">
+                <div class="preview-pane" id="preview-pane">
                     <div class="pane-title" id="preview-pane-title">Preview</div>
                     <div class="preview-viewport" id="preview-viewport">
                         <div class="empty-preview-msg" id="empty-preview-msg">No image selected</div>
@@ -144,24 +151,16 @@ function bindEvents() {
     const chkImgs = document.getElementById('chk-imgs');
     const chkGif = document.getElementById('chk-gif');
     const chkIco = document.getElementById('chk-ico');
-    const chkAll = document.getElementById('chk-all');
-
-    chkAll.onchange = (e) => {
-        const checked = e.target.checked;
-        chkImgs.checked = checked;
-        chkGif.checked = checked;
-        chkIco.checked = checked;
-        loadDirectoryFiles(currentPath);
-    };
+    const chkFolders = document.getElementById('chk-folders');
 
     const updateFilterGroup = () => {
-        chkAll.checked = chkImgs.checked && chkGif.checked && chkIco.checked;
         loadDirectoryFiles(currentPath);
     };
 
     chkImgs.onchange = updateFilterGroup;
     chkGif.onchange = updateFilterGroup;
     chkIco.onchange = updateFilterGroup;
+    chkFolders.onchange = updateFilterGroup;
 
     // Drive & Path input
     document.getElementById('drive-select').onchange = (e) => {
@@ -183,26 +182,32 @@ function bindEvents() {
     // Keyboard Shortcuts
     window.onkeydown = handleGlobalKeyDown;
 
+    // Init Splitter Dragging & Position Restoring
+    initSplitters();
+
     // Mouse Zoom & Pan strictly in Full Screen Overlay
     const fsOverlay = document.getElementById('fullscreen-overlay');
 
     fsOverlay.onwheel = handleWheelZoom;
     fsOverlay.onmousedown = handlePanStart;
 
-    window.onmousemove = handlePanMove;
-    window.onmouseup = handlePanEnd;
+    window.onmousemove = (e) => {
+        handlePanMove(e);
+        handleSplitterMove(e);
+    };
+    window.onmouseup = (e) => {
+        handlePanEnd(e);
+        handleSplitterEnd(e);
+    };
 }
 
 // Helper: Get Active Category Filters
 function getActiveAllowedTypes() {
     const allowed = [];
-    if (document.getElementById('chk-all').checked) {
-        allowed.push('all');
-    } else {
-        if (document.getElementById('chk-imgs').checked) allowed.push('img');
-        if (document.getElementById('chk-gif').checked) allowed.push('gif');
-        if (document.getElementById('chk-ico').checked) allowed.push('ico');
-    }
+    if (document.getElementById('chk-imgs').checked) allowed.push('img');
+    if (document.getElementById('chk-gif').checked) allowed.push('gif');
+    if (document.getElementById('chk-ico').checked) allowed.push('ico');
+    if (document.getElementById('chk-folders').checked) allowed.push('folders');
     return allowed;
 }
 
@@ -510,10 +515,16 @@ async function updatePreview() {
     imgEl.style.display = 'block';
 
     let dataUrl = fileDataCache.get(file.path);
-    if (!dataUrl) {
+    if (!dataUrl || file.width === 0) {
         try {
-            dataUrl = await GetFileBase64(file.path);
-            fileDataCache.set(file.path, dataUrl);
+            const details = await GetFileDetails(file.path);
+            if (details) {
+                dataUrl = details.dataUrl;
+                file.width = details.width;
+                file.height = details.height;
+                fileDataCache.set(file.path, dataUrl);
+                updateStatusBar();
+            }
         } catch (err) {
             emptyMsg.textContent = 'Failed to load image preview';
             emptyMsg.style.display = 'block';
@@ -577,19 +588,22 @@ async function stepGifFrame(direction) {
 
     if (!frames || frames.length === 0) return;
 
-    // Pause animation when frame stepping
+    // Pause animation when frame stepping without triggering asynchronous race conditions
     if (isAnimated) {
-        toggleAnimate();
+        isAnimated = false;
+        const btn = document.getElementById('btn-animate');
+        if (btn) btn.classList.remove('btn-active');
+        stopGifAnimation();
     }
 
     currentGifFrames = frames;
     currentGifFrameIndex = (currentGifFrameIndex + direction + frames.length) % frames.length;
 
     const frameData = frames[currentGifFrameIndex];
-    document.getElementById('preview-image').src = frameData;
-    if (isFullScreen) {
-        document.getElementById('fullscreen-image').src = frameData;
-    }
+    const imgEl = document.getElementById('preview-image');
+    const fsImgEl = document.getElementById('fullscreen-image');
+    if (imgEl) imgEl.src = frameData;
+    if (isFullScreen && fsImgEl) fsImgEl.src = frameData;
 }
 
 // Navigation (Next / Prev)
@@ -858,6 +872,33 @@ function handleGlobalKeyDown(e) {
         return;
     }
 
+    // Enter key: navigate into folder if highlighted item is a directory
+    if (e.key === 'Enter') {
+        if (!isFullScreen && highlightedIndex >= 0 && highlightedIndex < files.length) {
+            const file = files[highlightedIndex];
+            if (file && file.isDirectory) {
+                e.preventDefault();
+                navigateToFolder(file.path);
+                return;
+            }
+        }
+    }
+
+    // Backspace key: navigate to parent directory (same as ..)
+    if (e.key === 'Backspace' && !isFullScreen) {
+        e.preventDefault();
+        if (currentPath) {
+            let parentDir = currentPath.replace(/[/\\][^/\\]+[/\\]?$/, '');
+            if (parentDir === '' && (currentPath.startsWith('/') || currentPath.startsWith('\\'))) {
+                parentDir = '/';
+            }
+            if (parentDir && parentDir !== currentPath) {
+                navigateToFolder(parentDir);
+            }
+        }
+        return;
+    }
+
     // F2 Rename
     if (e.key === 'F2') {
         e.preventDefault();
@@ -970,7 +1011,19 @@ function handleGlobalKeyDown(e) {
         if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
             e.preventDefault();
             const grid = document.getElementById('thumb-grid');
-            const colCount = Math.max(1, Math.floor(grid.clientWidth / 120));
+            const cards = grid.querySelectorAll('.thumb-card');
+
+            let colCount = 1;
+            if (cards.length > 1) {
+                const firstTop = cards[0].offsetTop;
+                for (let i = 1; i < cards.length; i++) {
+                    if (cards[i].offsetTop > firstTop) {
+                        colCount = i;
+                        break;
+                    }
+                }
+            }
+
             const delta = (e.key === 'ArrowDown') ? colCount : -colCount;
             const newIndex = highlightedIndex + delta;
             if (newIndex >= 0 && newIndex < files.length) {
@@ -1028,6 +1081,75 @@ function escapeHtml(str) {
               .replace(/>/g, "&gt;")
               .replace(/"/g, "&quot;")
               .replace(/'/g, "&#039;");
+}
+
+// Splitters Drag & Persistent Position State
+let activeSplitter = null; // 'vertical' or 'horizontal'
+
+function initSplitters() {
+    const sidebar = document.getElementById('sidebar');
+    const previewPane = document.getElementById('preview-pane');
+    const splitterV = document.getElementById('splitter-v');
+    const splitterH = document.getElementById('splitter-h');
+
+    // Restore saved positions from localStorage
+    const savedSidebarWidth = localStorage.getItem('eview_sidebar_width');
+    if (savedSidebarWidth && sidebar) {
+        sidebar.style.width = `${savedSidebarWidth}px`;
+    }
+
+    const savedPreviewHeight = localStorage.getItem('eview_preview_height');
+    if (savedPreviewHeight && previewPane) {
+        previewPane.style.height = `${savedPreviewHeight}px`;
+    }
+
+    if (splitterV) {
+        splitterV.onmousedown = (e) => {
+            e.preventDefault();
+            activeSplitter = 'vertical';
+            splitterV.classList.add('dragging');
+        };
+    }
+
+    if (splitterH) {
+        splitterH.onmousedown = (e) => {
+            e.preventDefault();
+            activeSplitter = 'horizontal';
+            splitterH.classList.add('dragging');
+        };
+    }
+}
+
+function handleSplitterMove(e) {
+    if (!activeSplitter) return;
+
+    if (activeSplitter === 'vertical') {
+        const workspace = document.getElementById('workspace');
+        const sidebar = document.getElementById('sidebar');
+        if (workspace && sidebar) {
+            const rect = workspace.getBoundingClientRect();
+            const newWidth = Math.max(120, Math.min(rect.width - 200, e.clientX - rect.left));
+            sidebar.style.width = `${newWidth}px`;
+            localStorage.setItem('eview_sidebar_width', newWidth);
+        }
+    } else if (activeSplitter === 'horizontal') {
+        const mainContent = document.getElementById('main-content');
+        const previewPane = document.getElementById('preview-pane');
+        if (mainContent && previewPane) {
+            const rect = mainContent.getBoundingClientRect();
+            const newHeight = Math.max(80, Math.min(rect.height - 100, rect.bottom - e.clientY));
+            previewPane.style.height = `${newHeight}px`;
+            localStorage.setItem('eview_preview_height', newHeight);
+        }
+    }
+}
+
+function handleSplitterEnd() {
+    if (activeSplitter) {
+        document.getElementById('splitter-v')?.classList.remove('dragging');
+        document.getElementById('splitter-h')?.classList.remove('dragging');
+        activeSplitter = null;
+    }
 }
 
 // Start app when DOM ready

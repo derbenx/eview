@@ -17,6 +17,10 @@ export function GetFileBase64(arg1) {
     return window['go']['main']['App']['GetFileBase64'](arg1);
 }
 
+export function GetFileDetails(arg1) {
+    return window['go']['main']['App']['GetFileDetails'](arg1);
+}
+
 export function GetGIFFrames(arg1) {
     return window['go']['main']['App']['GetGIFFrames'](arg1);
 }

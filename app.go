@@ -167,8 +167,8 @@ func (a *App) GetFilesInDirectory(dirPath string, allowedTypes []string) ([]File
 
 	var items []FileInfo
 
-	// Include parent directory ".." if "all" filter is checked and not at root
-	if typeMap["all"] {
+	// Include parent directory ".." if "folders" filter is checked and not at root
+	if typeMap["folders"] {
 		parentDir := filepath.Dir(dirPath)
 		if parentDir != dirPath && parentDir != "" {
 			items = append(items, FileInfo{
@@ -184,7 +184,7 @@ func (a *App) GetFilesInDirectory(dirPath string, allowedTypes []string) ([]File
 		fullPath := filepath.Join(dirPath, entry.Name())
 
 		if entry.IsDir() {
-			if typeMap["all"] {
+			if typeMap["folders"] {
 				items = append(items, FileInfo{
 					Name:        entry.Name(),
 					Path:        fullPath,
@@ -200,20 +200,16 @@ func (a *App) GetFilesInDirectory(dirPath string, allowedTypes []string) ([]File
 			ext = ext[1:]
 		}
 
-		// Group extensions into categories: img (jpg, jpeg, png, webp, ico), gif
+		// Only include files matching app's designed media categories (imgs, gif, ico)
 		matched := false
-		if typeMap["all"] {
+		if typeMap["img"] && (ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "webp") {
 			matched = true
-		} else {
-			if typeMap["img"] && (ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "webp") {
-				matched = true
-			}
-			if typeMap["gif"] && ext == "gif" {
-				matched = true
-			}
-			if typeMap["ico"] && ext == "ico" {
-				matched = true
-			}
+		}
+		if typeMap["gif"] && ext == "gif" {
+			matched = true
+		}
+		if typeMap["ico"] && ext == "ico" {
+			matched = true
 		}
 
 		if matched {
@@ -231,29 +227,57 @@ func (a *App) GetFilesInDirectory(dirPath string, allowedTypes []string) ([]File
 				IsGIF:     ext == "gif",
 			}
 
-			// Read image dimensions if possible
-			if f, err := os.Open(fullPath); err == nil {
-				if cfg, _, err := image.DecodeConfig(f); err == nil {
-					fileItem.Width = cfg.Width
-					fileItem.Height = cfg.Height
-				}
-				f.Close()
-			}
-
-			if fileItem.IsGIF {
-				if f, err := os.Open(fullPath); err == nil {
-					if g, err := gif.DecodeAll(f); err == nil {
-						fileItem.FrameCount = len(g.Image)
-					}
-					f.Close()
-				}
-			}
-
 			items = append(items, fileItem)
 		}
 	}
 
 	return items, nil
+}
+
+type FileDetails struct {
+	DataURL string `json:"dataUrl"`
+	Width   int    `json:"width"`
+	Height  int    `json:"height"`
+}
+
+// GetFileDetails reads file base64 data and image dimensions lazily
+func (a *App) GetFileDetails(filePath string) (*FileDetails, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file: %w", err)
+	}
+
+	ext := strings.ToLower(filepath.Ext(filePath))
+	mimeType := "image/jpeg"
+	switch ext {
+	case ".png":
+		mimeType = "image/png"
+	case ".gif":
+		mimeType = "image/gif"
+	case ".webp":
+		mimeType = "image/webp"
+	case ".ico":
+		mimeType = "image/x-icon"
+	case ".jpg", ".jpeg":
+		mimeType = "image/jpeg"
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(data)
+	dataURL := fmt.Sprintf("data:%s;base64,%s", mimeType, encoded)
+
+	details := &FileDetails{
+		DataURL: dataURL,
+	}
+
+	if f, err := os.Open(filePath); err == nil {
+		if cfg, _, err := image.DecodeConfig(f); err == nil {
+			details.Width = cfg.Width
+			details.Height = cfg.Height
+		}
+		f.Close()
+	}
+
+	return details, nil
 }
 
 // GetFileBase64 reads a file and returns base64 string

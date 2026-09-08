@@ -149,17 +149,47 @@ html, body {
     position: relative;
 }
 
+/* --- SPLITTER BARS --- */
+.splitter-vertical {
+    width: 6px;
+    background-color: #2b2b2b;
+    border-left: 1px solid #333;
+    border-right: 1px solid #333;
+    cursor: col-resize;
+    z-index: 20;
+    flex-shrink: 0;
+    transition: background-color 0.15s;
+}
+
+.splitter-vertical:hover, .splitter-vertical.dragging {
+    background-color: #007acc;
+}
+
+.splitter-horizontal {
+    height: 6px;
+    background-color: #2b2b2b;
+    border-top: 1px solid #333;
+    border-bottom: 1px solid #333;
+    cursor: row-resize;
+    z-index: 20;
+    flex-shrink: 0;
+    transition: background-color 0.15s;
+}
+
+.splitter-horizontal:hover, .splitter-horizontal.dragging {
+    background-color: #007acc;
+}
+
 /* --- LEFT SIDEBAR (DIRECTORY TREE) --- */
 .sidebar-resizable {
-    width: 25vw;
-    min-width: 160px;
-    max-width: 45vw;
-    resize: horizontal;
+    width: 250px;
+    min-width: 120px;
+    max-width: 600px;
     overflow: hidden;
     background-color: #202020;
-    border-right: 1px solid #333;
     display: flex;
     flex-direction: column;
+    flex-shrink: 0;
 }
 
 .pane-title {
@@ -212,15 +242,16 @@ html, body {
 /* --- RIGHT SIDE MAIN CONTENT --- */
 .main-content {
     flex: 1;
-    display: grid;
-    grid-template-rows: 1fr 1fr;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
     overflow: hidden;
     background-color: #151515;
 }
 
-/* TOP HALF: THUMBNAIL GRID */
+/* TOP HALF: THUMBNAIL GRID (Flex: 1 opens up space when window resizes) */
 .pane-top-split {
-    border-bottom: 1px solid #333;
+    flex: 1;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -305,15 +336,16 @@ html, body {
     color: #ccc;
 }
 
-/* BOTTOM HALF: PREVIEW VIEWPORT */
+/* BOTTOM HALF: PREVIEW VIEWPORT (Fixed height x from bottom) */
 .preview-pane {
-    flex: 1;
-    min-height: 0;
+    height: 300px;
+    min-height: 80px;
     display: flex;
     flex-direction: column;
     overflow: hidden;
     background-color: #0d0d0d;
     position: relative;
+    flex-shrink: 0;
 }
 
 .preview-viewport {
