@@ -21,7 +21,7 @@ let fileDataCache = new Map(); // path -> base64 data URL
 let gifFramesCache = new Map(); // path -> array of frame base64 data URLs
 
 // GIF Animation State
-let isAnimated = true;
+let isAnimated = false; // Default animation off so single static frame is rendered unless toggled
 let currentGifFrameIndex = 0;
 let gifTimer = null;
 let currentGifFrames = [];
@@ -56,7 +56,7 @@ function initUI() {
             <div class="separator"></div>
             <button class="btn" id="btn-frame-back" title="Frame Back (<)">&lt;</button>
             <button class="btn" id="btn-frame-fwd" title="Frame Forward (>)">&gt;</button>
-            <button class="btn btn-active" id="btn-animate" title="Toggle GIF Animation">Animate</button>
+            <button class="btn" id="btn-animate" title="Toggle GIF Animation">Animate</button>
             <div class="separator"></div>
             <button class="btn" id="btn-fullscreen" title="Toggle Full Screen (Ctrl+F / F11)">Full Screen</button>
             <button class="btn" id="btn-select-all" title="Select All">Select All</button>
@@ -681,12 +681,14 @@ async function updatePreview() {
                 currentGifFrameIndex = 0;
             }
 
+            const frameData = frames[currentGifFrameIndex];
+            imgEl.src = frameData;
+            if (isFullScreen) fsImgEl.src = frameData;
+
             if (isAnimated) {
                 startGifAnimation();
             } else {
-                const frameData = frames[currentGifFrameIndex];
-                imgEl.src = frameData;
-                if (isFullScreen) fsImgEl.src = frameData;
+                updateGifFrameStatus();
             }
             return;
         }
@@ -822,15 +824,16 @@ function navigateFile(direction) {
 function navigateToBoundaryFile(position) {
     if (files.length === 0) return;
 
-    const selectedIndices = [];
+    // Find non-directory files
+    const nonDirIndices = [];
     files.forEach((f, idx) => {
-        if (selectedPaths.has(f.path)) {
-            selectedIndices.push(idx);
+        if (!f.isDirectory) {
+            nonDirIndices.push(idx);
         }
     });
 
-    if (selectedIndices.length > 0) {
-        highlightedIndex = (position === 'first') ? selectedIndices[0] : selectedIndices[selectedIndices.length - 1];
+    if (nonDirIndices.length > 0) {
+        highlightedIndex = (position === 'first') ? nonDirIndices[0] : nonDirIndices[nonDirIndices.length - 1];
     } else {
         highlightedIndex = (position === 'first') ? 0 : files.length - 1;
     }
@@ -839,6 +842,28 @@ function navigateToBoundaryFile(position) {
     renderThumbnails();
     updatePreview();
     updateStatusBar();
+}
+
+function getGridPageSize() {
+    const grid = document.getElementById('thumb-grid');
+    if (!grid) return 10;
+    const cards = grid.querySelectorAll('.thumb-card');
+    if (cards.length === 0) return 10;
+
+    let colCount = 1;
+    const firstTop = cards[0].offsetTop;
+    for (let i = 1; i < cards.length; i++) {
+        if (cards[i].offsetTop > firstTop) {
+            colCount = i;
+            break;
+        }
+    }
+
+    const cardHeight = cards[0].offsetHeight || 140;
+    const visibleHeight = grid.clientHeight || 400;
+    const visibleRows = Math.max(1, Math.floor(visibleHeight / cardHeight));
+
+    return Math.max(1, visibleRows * colCount);
 }
 
 // Selection Functions
@@ -1217,15 +1242,37 @@ function handleGlobalKeyDown(e) {
         return;
     }
 
-    // PageUp / PageDown Keys: Always navigate next/prev file
+    // PageUp / PageDown Keys: Jump by grid page size in thumbnail mode, 1 file in fullscreen
     if (e.key === 'PageUp' || e.key === 'PgUp') {
         e.preventDefault();
-        navigateFile(-1);
+        if (isFullScreen) {
+            navigateFile(-1);
+        } else {
+            const pageSize = getGridPageSize();
+            if (highlightedIndex >= 0 && files.length > 0) {
+                highlightedIndex = Math.max(0, highlightedIndex - pageSize);
+                resetZoom();
+                renderThumbnails();
+                updatePreview();
+                updateStatusBar();
+            }
+        }
         return;
     }
     if (e.key === 'PageDown' || e.key === 'PgDn') {
         e.preventDefault();
-        navigateFile(1);
+        if (isFullScreen) {
+            navigateFile(1);
+        } else {
+            const pageSize = getGridPageSize();
+            if (highlightedIndex >= 0 && files.length > 0) {
+                highlightedIndex = Math.min(files.length - 1, highlightedIndex + pageSize);
+                resetZoom();
+                renderThumbnails();
+                updatePreview();
+                updateStatusBar();
+            }
+        }
         return;
     }
 
