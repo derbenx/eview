@@ -86,6 +86,8 @@ function initUI() {
                 <option value="height-desc">Height Des</option>
                 <option value="width-asc">Width Asd</option>
                 <option value="width-desc">Width Des</option>
+                <option value="ratio-asc">Ratio Asd</option>
+                <option value="ratio-desc">Ratio Des</option>
             </select>
             <label class="chk-folders-first" title="Keep folders at top of list"><input type="checkbox" id="chk-folders-first" checked> folders first</label>
         </div>
@@ -439,6 +441,9 @@ function sortAndRenderFiles(targetFileName = null) {
         } else if (field === 'width') {
             valA = a.width || 0;
             valB = b.width || 0;
+        } else if (field === 'ratio') {
+            valA = (a.height > 0) ? (a.width / a.height) : 0;
+            valB = (b.height > 0) ? (b.width / b.height) : 0;
         }
 
         if (valA < valB) return isAsc ? -1 : 1;
@@ -542,20 +547,13 @@ function renderThumbnails() {
         }
 
         card.onclick = (e) => {
-            if (file && file.isDirectory) {
-                navigateToFolder(file.path);
-                return;
-            }
-
             if (e.ctrlKey || e.metaKey) {
                 toggleSelectionIndex(idx);
             } else if (e.shiftKey && highlightedIndex >= 0) {
                 const start = Math.min(highlightedIndex, idx);
                 const end = Math.max(highlightedIndex, idx);
                 for (let i = start; i <= end; i++) {
-                    if (!files[i].isDirectory) {
-                        selectedPaths.add(files[i].path);
-                    }
+                    selectedPaths.add(files[i].path);
                 }
                 highlightedIndex = idx;
                 renderThumbnails();
@@ -591,9 +589,9 @@ function renderThumbnails() {
     }
 }
 
-// Asynchronously load image for thumbnail (static for GIFs)
+// Asynchronously load image for thumbnail (static for GIFs using frame 0)
 async function loadThumbnailImage(file, idx) {
-    let dataUrl = fileDataCache.get(file.path);
+    let dataUrl = null;
 
     if (file.isGif) {
         let frames = gifFramesCache.get(file.path);
@@ -606,19 +604,20 @@ async function loadThumbnailImage(file, idx) {
         if (frames && frames.length > 0) {
             dataUrl = frames[0];
         }
-    }
-
-    if (!dataUrl) {
-        try {
-            dataUrl = await GetFileBase64(file.path);
-            fileDataCache.set(file.path, dataUrl);
-        } catch (err) {
-            return;
+    } else {
+        dataUrl = fileDataCache.get(file.path);
+        if (!dataUrl) {
+            try {
+                dataUrl = await GetFileBase64(file.path);
+                fileDataCache.set(file.path, dataUrl);
+            } catch (err) {
+                return;
+            }
         }
     }
 
     const wrapper = document.getElementById(`thumb-img-wrapper-${idx}`);
-    if (wrapper) {
+    if (wrapper && dataUrl) {
         wrapper.innerHTML = `<img src="${dataUrl}" class="thumb-img" alt="${escapeHtml(file.name)}" draggable="false" />`;
     }
 }
