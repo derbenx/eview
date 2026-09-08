@@ -75,6 +75,19 @@ function initUI() {
             <select class="drive-select" id="drive-select"></select>
             <button class="btn" id="btn-reload-drives" title="Reload Drives List">🔄</button>
             <input type="text" class="path-input" id="path-input" placeholder="Enter path and press Enter..." />
+            <select class="sort-select" id="sort-select" title="Sort Order">
+                <option value="name-asc">Name Asd</option>
+                <option value="name-desc">Name Des</option>
+                <option value="date-asc">Date Asd</option>
+                <option value="date-desc">Date Des</option>
+                <option value="size-asc">FSize Asd</option>
+                <option value="size-desc">FSize Des</option>
+                <option value="height-asc">Height Asd</option>
+                <option value="height-desc">Height Des</option>
+                <option value="width-asc">Width Asd</option>
+                <option value="width-desc">Width Des</option>
+            </select>
+            <label class="chk-folders-first" title="Keep folders at top of list"><input type="checkbox" id="chk-folders-first" checked> folders first</label>
         </div>
 
         <!-- MASTER WORKSPACE -->
@@ -186,6 +199,14 @@ function bindEvents() {
         }
     };
 
+    document.getElementById('sort-select').onchange = () => {
+        sortAndRenderFiles();
+    };
+
+    document.getElementById('chk-folders-first').onchange = () => {
+        sortAndRenderFiles();
+    };
+
     // Keyboard Shortcuts
     window.onkeydown = handleGlobalKeyDown;
 
@@ -242,16 +263,8 @@ async function handleTargetPath(pathStr) {
     try {
         const target = await GetInitialTarget(pathStr || '');
         if (target && target.directory) {
-            await navigateToFolder(target.directory);
-            if (target.isFile && target.fileName) {
-                const targetIdx = files.findIndex(f => f.name.toLowerCase() === target.fileName.toLowerCase());
-                if (targetIdx >= 0) {
-                    highlightedIndex = targetIdx;
-                    renderThumbnails();
-                    updatePreview();
-                    updateStatusBar();
-                }
-            }
+            const targetFile = target.isFile ? target.fileName : null;
+            await navigateToFolder(target.directory, targetFile);
             return true;
         }
     } catch (err) {
@@ -284,7 +297,7 @@ function getSelectedDrivePath() {
 }
 
 // Directory Navigation & Tree Rendering
-async function navigateToFolder(dirPath) {
+async function navigateToFolder(dirPath, targetFileName = null) {
     currentPath = dirPath;
     document.getElementById('path-input').value = dirPath;
 
@@ -300,7 +313,7 @@ async function navigateToFolder(dirPath) {
     // Expand tree path
     treeExpandedPaths.add(dirPath);
     renderTree();
-    loadDirectoryFiles(dirPath);
+    await loadDirectoryFiles(dirPath, targetFileName);
 }
 
 async function renderTree() {
@@ -370,19 +383,16 @@ async function renderTreeNodeHTML(path, label, depth) {
 }
 
 // Load Files in Directory & Render Thumbnails
-async function loadDirectoryFiles(dirPath) {
+async function loadDirectoryFiles(dirPath, targetFileName = null) {
     if (!dirPath) return;
 
     const allowedTypes = getActiveAllowedTypes();
     try {
         files = await GetFilesInDirectory(dirPath, allowedTypes) || [];
-        highlightedIndex = files.length > 0 ? 0 : -1;
         selectedPaths.clear();
         resetZoom();
 
-        renderThumbnails();
-        updatePreview();
-        updateStatusBar();
+        sortAndRenderFiles(targetFileName);
     } catch (err) {
         console.error('Failed to list files:', err);
         files = [];
@@ -391,6 +401,80 @@ async function loadDirectoryFiles(dirPath) {
         updatePreview();
         updateStatusBar();
     }
+}
+
+// Sort files according to active sort-select and chk-folders-first options
+function sortAndRenderFiles(targetFileName = null) {
+    if (!files || files.length === 0) {
+        highlightedIndex = -1;
+        renderThumbnails();
+        updatePreview();
+        updateStatusBar();
+        return;
+    }
+
+    const sortVal = document.getElementById('sort-select')?.value || 'name-asc';
+    const foldersFirst = document.getElementById('chk-folders-first')?.checked ?? true;
+
+    const [field, direction] = sortVal.split('-');
+    const isAsc = direction === 'asc';
+
+    // Helper comparator for 2 files
+    const compareFiles = (a, b) => {
+        let valA = a[field] ?? '';
+        let valB = b[field] ?? '';
+
+        if (field === 'name') {
+            valA = (a.name || '').toLowerCase();
+            valB = (b.name || '').toLowerCase();
+        } else if (field === 'date') {
+            valA = a.modTime || '';
+            valB = b.modTime || '';
+        } else if (field === 'size') {
+            valA = a.size || 0;
+            valB = b.size || 0;
+        } else if (field === 'height') {
+            valA = a.height || 0;
+            valB = b.height || 0;
+        } else if (field === 'width') {
+            valA = a.width || 0;
+            valB = b.width || 0;
+        }
+
+        if (valA < valB) return isAsc ? -1 : 1;
+        if (valA > valB) return isAsc ? 1 : -1;
+        return 0;
+    };
+
+    // Keep track of previously highlighted file path
+    const prevHighlightedPath = (highlightedIndex >= 0 && files[highlightedIndex]) ? files[highlightedIndex].path : null;
+
+    if (foldersFirst) {
+        const parentDir = files.filter(f => f.name === '..');
+        const directories = files.filter(f => f.isDirectory && f.name !== '..').sort(compareFiles);
+        const regularFiles = files.filter(f => !f.isDirectory).sort(compareFiles);
+
+        files = [...parentDir, ...directories, ...regularFiles];
+    } else {
+        const parentDir = files.filter(f => f.name === '..');
+        const rest = files.filter(f => f.name !== '..').sort(compareFiles);
+        files = [...parentDir, ...rest];
+    }
+
+    // Restore or set target highlightedIndex
+    if (targetFileName) {
+        const targetIdx = files.findIndex(f => f.name.toLowerCase() === targetFileName.toLowerCase());
+        highlightedIndex = targetIdx >= 0 ? targetIdx : (files.length > 0 ? 0 : -1);
+    } else if (prevHighlightedPath) {
+        const newIdx = files.findIndex(f => f.path === prevHighlightedPath);
+        highlightedIndex = newIdx >= 0 ? newIdx : (files.length > 0 ? 0 : -1);
+    } else {
+        highlightedIndex = files.length > 0 ? 0 : -1;
+    }
+
+    renderThumbnails();
+    updatePreview();
+    updateStatusBar();
 }
 
 // Render Thumbnails Grid & Lazy Load
@@ -627,6 +711,7 @@ function startGifAnimation() {
         const frameData = currentGifFrames[currentGifFrameIndex];
         if (imgEl) imgEl.src = frameData;
         if (isFullScreen && fsImgEl) fsImgEl.src = frameData;
+        updateGifFrameStatus();
     }, 100);
 }
 
@@ -650,6 +735,7 @@ function toggleAnimate() {
     } else {
         btn.classList.remove('btn-active');
         stopGifAnimation();
+        updateGifFrameStatus();
     }
 }
 
@@ -685,6 +771,20 @@ async function stepGifFrame(direction) {
     const fsImgEl = document.getElementById('fullscreen-image');
     if (imgEl) imgEl.src = frameData;
     if (isFullScreen && fsImgEl) fsImgEl.src = frameData;
+    updateGifFrameStatus();
+}
+
+function updateGifFrameStatus() {
+    const titleEl = document.getElementById('preview-pane-title');
+    if (!titleEl) return;
+
+    if (highlightedIndex >= 0 && files[highlightedIndex]?.isGif && currentGifFrames.length > 0) {
+        const frameStr = `Frame ${currentGifFrameIndex + 1}/${currentGifFrames.length}`;
+        const stateStr = isAnimated ? 'Playing' : 'Paused';
+        titleEl.textContent = `Preview (${frameStr} - ${stateStr})`;
+    } else {
+        titleEl.textContent = 'Preview';
+    }
 }
 
 // Navigation (Next / Prev / Home / End)
@@ -1214,8 +1314,13 @@ function updateStatusBar() {
     if (highlightedIndex >= 0 && highlightedIndex < files.length) {
         const file = files[highlightedIndex];
         document.getElementById('info-file').textContent = `File: ${file.name}`;
-        document.getElementById('info-dim').textContent = `Resolution: ${file.width > 0 ? file.width + 'x' + file.height : 'Unknown'}`;
-        document.getElementById('info-size').textContent = `Size: ${formatFileSize(file.size)}`;
+        if (file.isDirectory) {
+            document.getElementById('info-dim').textContent = 'Resolution: -';
+            document.getElementById('info-size').textContent = `Size: ${formatFileSize(file.size, true)}`;
+        } else {
+            document.getElementById('info-dim').textContent = `Resolution: ${file.width > 0 ? file.width + 'x' + file.height : 'Unknown'}`;
+            document.getElementById('info-size').textContent = `Size: ${formatFileSize(file.size, false)}`;
+        }
     } else {
         document.getElementById('info-file').textContent = 'File: -';
         document.getElementById('info-dim').textContent = 'Resolution: -';
@@ -1224,7 +1329,8 @@ function updateStatusBar() {
 }
 
 // Utilities
-function formatFileSize(bytes) {
+function formatFileSize(bytes, isDir = false) {
+    if (isDir) return 'folder';
     if (bytes === 0) return '0 B';
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB'];
