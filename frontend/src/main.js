@@ -196,9 +196,13 @@ function bindEvents() {
 // Helper: Get Active Category Filters
 function getActiveAllowedTypes() {
     const allowed = [];
-    if (document.getElementById('chk-imgs').checked) allowed.push('img');
-    if (document.getElementById('chk-gif').checked) allowed.push('gif');
-    if (document.getElementById('chk-ico').checked) allowed.push('ico');
+    if (document.getElementById('chk-all').checked) {
+        allowed.push('all');
+    } else {
+        if (document.getElementById('chk-imgs').checked) allowed.push('img');
+        if (document.getElementById('chk-gif').checked) allowed.push('gif');
+        if (document.getElementById('chk-ico').checked) allowed.push('ico');
+    }
     return allowed;
 }
 
@@ -368,12 +372,13 @@ function renderThumbnails() {
         const isSelected = selectedPaths.has(file.path);
 
         let icon = '🖼️';
-        if (file.isGif) icon = '🎞️';
+        if (file.isDirectory) icon = '📁';
+        else if (file.isGif) icon = '🎞️';
         else if (file.extension === 'ico') icon = '💠';
 
         // Check if cached image is already available
         const cachedUrl = fileDataCache.get(file.path);
-        const imgContent = cachedUrl
+        const imgContent = (cachedUrl && !file.isDirectory)
             ? `<img src="${cachedUrl}" class="thumb-img" alt="${escapeHtml(file.name)}" draggable="false" />`
             : `<div class="thumb-icon-placeholder">${icon}</div>`;
 
@@ -398,13 +403,20 @@ function renderThumbnails() {
         }
 
         card.onclick = (e) => {
+            if (file && file.isDirectory) {
+                navigateToFolder(file.path);
+                return;
+            }
+
             if (e.ctrlKey || e.metaKey) {
                 toggleSelectionIndex(idx);
             } else if (e.shiftKey && highlightedIndex >= 0) {
                 const start = Math.min(highlightedIndex, idx);
                 const end = Math.max(highlightedIndex, idx);
                 for (let i = start; i <= end; i++) {
-                    selectedPaths.add(files[i].path);
+                    if (!files[i].isDirectory) {
+                        selectedPaths.add(files[i].path);
+                    }
                 }
                 highlightedIndex = idx;
                 renderThumbnails();
@@ -420,9 +432,13 @@ function renderThumbnails() {
 
         card.ondblclick = (e) => {
             e.stopPropagation();
-            highlightedIndex = idx;
-            if (!isFullScreen) {
-                toggleFullScreen();
+            if (file && file.isDirectory) {
+                navigateToFolder(file.path);
+            } else {
+                highlightedIndex = idx;
+                if (!isFullScreen) {
+                    toggleFullScreen();
+                }
             }
         };
     });
@@ -436,9 +452,23 @@ function renderThumbnails() {
     }
 }
 
-// Asynchronously load image for thumbnail
+// Asynchronously load image for thumbnail (static for GIFs)
 async function loadThumbnailImage(file, idx) {
     let dataUrl = fileDataCache.get(file.path);
+
+    if (file.isGif) {
+        let frames = gifFramesCache.get(file.path);
+        if (!frames) {
+            try {
+                frames = await GetGIFFrames(file.path);
+                gifFramesCache.set(file.path, frames);
+            } catch (err) {}
+        }
+        if (frames && frames.length > 0) {
+            dataUrl = frames[0];
+        }
+    }
+
     if (!dataUrl) {
         try {
             dataUrl = await GetFileBase64(file.path);
@@ -468,10 +498,17 @@ async function updatePreview() {
         return;
     }
 
+    const file = files[highlightedIndex];
+    if (file.isDirectory) {
+        emptyMsg.textContent = 'Directory selected: ' + file.name;
+        emptyMsg.style.display = 'block';
+        imgEl.style.display = 'none';
+        return;
+    }
+
     emptyMsg.style.display = 'none';
     imgEl.style.display = 'block';
 
-    const file = files[highlightedIndex];
     let dataUrl = fileDataCache.get(file.path);
     if (!dataUrl) {
         try {
@@ -482,6 +519,20 @@ async function updatePreview() {
             emptyMsg.style.display = 'block';
             imgEl.style.display = 'none';
             return;
+        }
+    }
+
+    // Handle GIF animation toggle (if Animate is false, extract static frame 0)
+    if (file.isGif && !isAnimated) {
+        let frames = gifFramesCache.get(file.path);
+        if (!frames) {
+            try {
+                frames = await GetGIFFrames(file.path);
+                gifFramesCache.set(file.path, frames);
+            } catch (err) {}
+        }
+        if (frames && frames.length > 0) {
+            dataUrl = frames[0];
         }
     }
 
@@ -823,54 +874,73 @@ function handleGlobalKeyDown(e) {
         return;
     }
 
-    // Zoom keys (+ / -)
-    if (e.key === '+' || e.key === '=') {
-        zoomLevel = Math.min(5.0, zoomLevel + 0.2);
-        applyZoomPan();
-        return;
-    }
-    if (e.key === '-' || e.key === '_') {
-        zoomLevel = Math.max(0.2, zoomLevel - 0.2);
-        applyZoomPan();
-        return;
+    // Fullscreen Mode Specific Keys: Zoom and Panning with Arrows/Keys
+    if (isFullScreen) {
+        if (e.key === '+' || e.key === '=') {
+            e.preventDefault();
+            zoomLevel = Math.min(5.0, zoomLevel + 0.2);
+            clampAndApplyPan();
+            return;
+        }
+        if (e.key === '-' || e.key === '_') {
+            e.preventDefault();
+            zoomLevel = Math.max(1.0, zoomLevel - 0.2);
+            clampAndApplyPan();
+            return;
+        }
+
+        // Arrow keys in Fullscreen: Pan image if zoomed in, or navigate files if zoomLevel == 1.0
+        if (zoomLevel > 1.0) {
+            const panStep = 30;
+            if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                panX += panStep;
+                clampAndApplyPan();
+                return;
+            }
+            if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                panX -= panStep;
+                clampAndApplyPan();
+                return;
+            }
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                panY += panStep;
+                clampAndApplyPan();
+                return;
+            }
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                panY -= panStep;
+                clampAndApplyPan();
+                return;
+            }
+        }
     }
 
-    // GIF Frame keys (< and >)
-    if (e.key === '<' || e.key === ',') {
-        stepGifFrame(-1);
-        return;
-    }
-    if (e.key === '>' || e.key === '.') {
-        stepGifFrame(1);
-        return;
-    }
-
-    // PageUp / PageDown Keys: Always navigate next/prev file in FullScreen mode, or scroll/navigate in normal mode
+    // PageUp / PageDown Keys: Always navigate next/prev file
     if (e.key === 'PageUp' || e.key === 'PgUp') {
         e.preventDefault();
         navigateFile(-1);
-        if (isFullScreen) updateFsInfo();
         return;
     }
     if (e.key === 'PageDown' || e.key === 'PgDn') {
         e.preventDefault();
         navigateFile(1);
-        if (isFullScreen) updateFsInfo();
         return;
     }
 
-    // Full Screen mode Arrow Keys: Next / Prev file
+    // Full Screen mode Arrow Keys when not zoomed in
     if (isFullScreen) {
         if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
             e.preventDefault();
             navigateFile(-1);
-            updateFsInfo();
             return;
         }
         if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
             e.preventDefault();
             navigateFile(1);
-            updateFsInfo();
             return;
         }
     } else {
@@ -912,6 +982,16 @@ function handleGlobalKeyDown(e) {
             }
             return;
         }
+    }
+
+    // GIF Frame keys (< and >)
+    if (e.key === '<' || e.key === ',') {
+        stepGifFrame(-1);
+        return;
+    }
+    if (e.key === '>' || e.key === '.') {
+        stepGifFrame(1);
+        return;
     }
 }
 

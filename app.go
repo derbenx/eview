@@ -49,15 +49,16 @@ type TreeNode struct {
 }
 
 type FileInfo struct {
-	Name       string `json:"name"`
-	Path       string `json:"path"`
-	Size       int64  `json:"size"`
-	ModTime    string `json:"modTime"`
-	Extension  string `json:"extension"`
-	Width      int    `json:"width"`
-	Height     int    `json:"height"`
-	IsGIF      bool   `json:"isGif"`
-	FrameCount int    `json:"frameCount"`
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	Size        int64  `json:"size"`
+	ModTime     string `json:"modTime"`
+	Extension   string `json:"extension"`
+	Width       int    `json:"width"`
+	Height      int    `json:"height"`
+	IsGIF       bool   `json:"isGif"`
+	IsDirectory bool   `json:"isDirectory"`
+	FrameCount  int    `json:"frameCount"`
 }
 
 // GetDrives returns available drive letters or root mounts
@@ -151,6 +152,7 @@ func (a *App) GetDirectories(dirPath string) ([]TreeNode, error) {
 	return nodes, nil
 }
 
+
 // GetFilesInDirectory lists files matching active categories/extensions
 func (a *App) GetFilesInDirectory(dirPath string, allowedTypes []string) ([]FileInfo, error) {
 	entries, err := os.ReadDir(dirPath)
@@ -163,9 +165,33 @@ func (a *App) GetFilesInDirectory(dirPath string, allowedTypes []string) ([]File
 		typeMap[strings.ToLower(t)] = true
 	}
 
-	var files []FileInfo
+	var items []FileInfo
+
+	// Include parent directory ".." if "all" filter is checked and not at root
+	if typeMap["all"] {
+		parentDir := filepath.Dir(dirPath)
+		if parentDir != dirPath && parentDir != "" {
+			items = append(items, FileInfo{
+				Name:        "..",
+				Path:        parentDir,
+				IsDirectory: true,
+				Extension:   "folder",
+			})
+		}
+	}
+
 	for _, entry := range entries {
+		fullPath := filepath.Join(dirPath, entry.Name())
+
 		if entry.IsDir() {
+			if typeMap["all"] {
+				items = append(items, FileInfo{
+					Name:        entry.Name(),
+					Path:        fullPath,
+					IsDirectory: true,
+					Extension:   "folder",
+				})
+			}
 			continue
 		}
 
@@ -176,18 +202,21 @@ func (a *App) GetFilesInDirectory(dirPath string, allowedTypes []string) ([]File
 
 		// Group extensions into categories: img (jpg, jpeg, png, webp, ico), gif
 		matched := false
-		if typeMap["img"] && (ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "webp") {
+		if typeMap["all"] {
 			matched = true
-		}
-		if typeMap["gif"] && ext == "gif" {
-			matched = true
-		}
-		if typeMap["ico"] && ext == "ico" {
-			matched = true
+		} else {
+			if typeMap["img"] && (ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "webp") {
+				matched = true
+			}
+			if typeMap["gif"] && ext == "gif" {
+				matched = true
+			}
+			if typeMap["ico"] && ext == "ico" {
+				matched = true
+			}
 		}
 
 		if matched {
-			fullPath := filepath.Join(dirPath, entry.Name())
 			info, err := entry.Info()
 			if err != nil {
 				continue
@@ -220,11 +249,11 @@ func (a *App) GetFilesInDirectory(dirPath string, allowedTypes []string) ([]File
 				}
 			}
 
-			files = append(files, fileItem)
+			items = append(items, fileItem)
 		}
 	}
 
-	return files, nil
+	return items, nil
 }
 
 // GetFileBase64 reads a file and returns base64 string

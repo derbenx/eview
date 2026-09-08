@@ -5,11 +5,20 @@
     user-select: none;
 }
 
-body {
+html, body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     background-color: #1a1a1a;
     color: #e0e0e0;
-    height: 100vh;
+}
+
+#app {
+    width: 100%;
+    height: 100%;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -133,6 +142,7 @@ body {
 /* --- MASTER WORKSPACE --- */
 .workspace {
     flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: row;
     overflow: hidden;
@@ -145,8 +155,7 @@ body {
     min-width: 160px;
     max-width: 45vw;
     resize: horizontal;
-    overflow-x: hidden;
-    overflow-y: auto;
+    overflow: hidden;
     background-color: #202020;
     border-right: 1px solid #333;
     display: flex;
@@ -161,13 +170,16 @@ body {
     padding: 8px 12px;
     background-color: #1c1c1c;
     border-bottom: 1px solid #2d2d2d;
+    flex-shrink: 0;
 }
 
 .tree-root {
     padding: 8px;
     font-size: 13px;
     list-style: none;
+    overflow-x: hidden;
     overflow-y: auto;
+    flex: 1;
 }
 
 .tree-node-item {
@@ -200,8 +212,8 @@ body {
 /* --- RIGHT SIDE MAIN CONTENT --- */
 .main-content {
     flex: 1;
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-rows: 1fr 1fr;
     overflow: hidden;
     background-color: #151515;
 }
@@ -209,13 +221,10 @@ body {
 /* TOP HALF: THUMBNAIL GRID */
 .pane-top-split {
     border-bottom: 1px solid #333;
-    resize: vertical;
-    height: 45vh;
-    min-height: 100px;
-    max-height: 75vh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    min-height: 0;
 }
 
 .thumb-grid {
@@ -299,6 +308,7 @@ body {
 /* BOTTOM HALF: PREVIEW VIEWPORT */
 .preview-pane {
     flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -308,6 +318,7 @@ body {
 
 .preview-viewport {
     flex: 1;
+    min-height: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -324,8 +335,6 @@ body {
     width: auto;
     height: auto;
     object-fit: contain;
-    transition: transform 0.1s ease-out;
-    cursor: grab;
 }
 
 .preview-image:active {
@@ -382,17 +391,7 @@ body {
 }
 
 .fullscreen-overlay .fs-info-bar {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background: rgba(0,0,0,0.7);
-    color: #fff;
-    padding: 6px 16px;
-    font-size: 12px;
-    display: flex;
-    justify-content: space-between;
-    pointer-events: none;
+    display: none !important;
 }
 
 /* --- MODAL DIALOG --- */
