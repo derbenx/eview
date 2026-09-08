@@ -103,3 +103,14 @@ func TestGetInitialTarget(t *testing.T) {
 		t.Errorf("Unexpected file target: %+v", targetFile)
 	}
 }
+
+func TestGetDrivesFast(t *testing.T) {
+	app := NewApp()
+	drives, err := app.GetDrives()
+	if err != nil {
+		t.Fatalf("GetDrives failed: %v", err)
+	}
+	if len(drives) == 0 {
+		t.Errorf("Expected at least 1 drive, got 0")
+	}
+}

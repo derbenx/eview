@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"image"
+	"image/draw"
 	"image/gif"
 	_ "image/jpeg"
 	"image/png"
@@ -12,6 +13,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"time"
 
 	_ "golang.org/x/image/bmp"
 	_ "golang.org/x/image/tiff"
@@ -102,18 +105,54 @@ type FileInfo struct {
 	FrameCount  int    `json:"frameCount"`
 }
 
-// GetDrives returns available drive letters or root mounts
+// GetDrives returns available drive letters or root mounts safely with concurrency timeout
 func (a *App) GetDrives() ([]DriveInfo, error) {
 	var drives []DriveInfo
 
 	if runtime.GOOS == "windows" {
+		type result struct {
+			info DriveInfo
+			ok   bool
+		}
+		resChan := make(chan result, 26)
+		var wg sync.WaitGroup
+
 		for _, drive := range "ABCDEFGHIJKLMNOPQRSTUVWXYZ" {
-			drivePath := string(drive) + ":\\"
-			if _, err := os.Stat(drivePath); err == nil {
-				drives = append(drives, DriveInfo{
-					Path:  drivePath,
-					Label: fmt.Sprintf("Local Disk (%c:)", drive),
-				})
+			wg.Add(1)
+			go func(d rune) {
+				defer wg.Done()
+				drivePath := string(d) + ":\\"
+
+				// Fast timeout check (100ms) to prevent slow/empty drives from blocking
+				done := make(chan bool, 1)
+				go func() {
+					_, err := os.Stat(drivePath)
+					done <- (err == nil)
+				}()
+
+				select {
+				case ok := <-done:
+					if ok {
+						resChan <- result{
+							info: DriveInfo{
+								Path:  drivePath,
+								Label: fmt.Sprintf("Local Disk (%c:)", d),
+							},
+							ok: true,
+						}
+					}
+				case <-time.After(100 * time.Millisecond):
+					// Timed out reading drive
+				}
+			}(drive)
+		}
+
+		wg.Wait()
+		close(resChan)
+
+		for r := range resChan {
+			if r.ok {
+				drives = append(drives, r.info)
 			}
 		}
 	} else {
@@ -122,7 +161,6 @@ func (a *App) GetDrives() ([]DriveInfo, error) {
 			Path:  "/",
 			Label: "Root (/)",
 		})
-		// Check common mount paths
 		mounts := []string{"/media", "/mnt", "/Volumes"}
 		for _, m := range mounts {
 			if entries, err := os.ReadDir(m); err == nil {
@@ -347,7 +385,7 @@ func (a *App) GetFileBase64(filePath string) (string, error) {
 	return fmt.Sprintf("data:%s;base64,%s", mimeType, encoded), nil
 }
 
-// GetGIFFrames decodes a GIF file and extracts all frames as base64 PNG data URLs
+// GetGIFFrames decodes a GIF file, composites each frame onto a full canvas, and returns base64 PNG data URLs
 func (a *App) GetGIFFrames(filePath string) ([]string, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
@@ -360,19 +398,38 @@ func (a *App) GetGIFFrames(filePath string) ([]string, error) {
 		return nil, fmt.Errorf("failed to decode GIF: %w", err)
 	}
 
+	if len(g.Image) == 0 {
+		return nil, fmt.Errorf("GIF contains no frames")
+	}
+
+	bounds := image.Rect(0, 0, g.Config.Width, g.Config.Height)
+	if bounds.Empty() && len(g.Image) > 0 {
+		bounds = g.Image[0].Bounds()
+	}
+
+	canvas := image.NewRGBA(bounds)
 	var frames []string
-	for _, img := range g.Image {
+
+	for i, img := range g.Image {
+		draw.Draw(canvas, img.Bounds(), img, img.Bounds().Min, draw.Over)
+
 		var buf strings.Builder
 		encoder := base64.NewEncoder(base64.StdEncoding, &buf)
-
-		// Encode frame as PNG into base64
-		if err := png.Encode(encoder, img); err != nil {
+		if err := png.Encode(encoder, canvas); err == nil {
 			encoder.Close()
-			continue
+			frames = append(frames, "data:image/png;base64,"+buf.String())
+		} else {
+			encoder.Close()
 		}
-		encoder.Close()
 
-		frames = append(frames, "data:image/png;base64,"+buf.String())
+		// Handle frame disposal
+		var disposal byte
+		if i < len(g.Disposal) {
+			disposal = g.Disposal[i]
+		}
+		if disposal == gif.DisposalBackground {
+			draw.Draw(canvas, img.Bounds(), image.Transparent, image.Point{}, draw.Src)
+		}
 	}
 
 	return frames, nil

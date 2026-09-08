@@ -73,6 +73,7 @@ function initUI() {
         <!-- DRIVE & PATH BAR -->
         <div class="path-bar-container">
             <select class="drive-select" id="drive-select"></select>
+            <button class="btn" id="btn-reload-drives" title="Reload Drives List">🔄</button>
             <input type="text" class="path-input" id="path-input" placeholder="Enter path and press Enter..." />
         </div>
 
@@ -170,6 +171,10 @@ function bindEvents() {
         if (drivePath) {
             navigateToFolder(drivePath);
         }
+    };
+
+    document.getElementById('btn-reload-drives').onclick = () => {
+        loadDrives();
     };
 
     document.getElementById('path-input').onkeydown = (e) => {
@@ -578,8 +583,7 @@ async function updatePreview() {
         }
     }
 
-    // Handle GIF animation toggle (if Animate is false, extract static frame 0)
-    if (file.isGif && !isAnimated) {
+    if (file.isGif) {
         let frames = gifFramesCache.get(file.path);
         if (!frames) {
             try {
@@ -587,8 +591,21 @@ async function updatePreview() {
                 gifFramesCache.set(file.path, frames);
             } catch (err) {}
         }
+
         if (frames && frames.length > 0) {
-            dataUrl = frames[0];
+            currentGifFrames = frames;
+            if (currentGifFrameIndex >= frames.length) {
+                currentGifFrameIndex = 0;
+            }
+
+            if (isAnimated) {
+                startGifAnimation();
+            } else {
+                const frameData = frames[currentGifFrameIndex];
+                imgEl.src = frameData;
+                if (isFullScreen) fsImgEl.src = frameData;
+            }
+            return;
         }
     }
 
@@ -596,6 +613,21 @@ async function updatePreview() {
     if (isFullScreen) {
         fsImgEl.src = dataUrl;
     }
+}
+
+function startGifAnimation() {
+    stopGifAnimation();
+    if (!currentGifFrames || currentGifFrames.length === 0) return;
+
+    const imgEl = document.getElementById('preview-image');
+    const fsImgEl = document.getElementById('fullscreen-image');
+
+    gifTimer = setInterval(() => {
+        currentGifFrameIndex = (currentGifFrameIndex + 1) % currentGifFrames.length;
+        const frameData = currentGifFrames[currentGifFrameIndex];
+        if (imgEl) imgEl.src = frameData;
+        if (isFullScreen && fsImgEl) fsImgEl.src = frameData;
+    }, 100);
 }
 
 function stopGifAnimation() {
@@ -610,11 +642,15 @@ function toggleAnimate() {
     const btn = document.getElementById('btn-animate');
     if (isAnimated) {
         btn.classList.add('btn-active');
+        if (currentGifFrames && currentGifFrames.length > 0) {
+            startGifAnimation();
+        } else {
+            updatePreview();
+        }
     } else {
         btn.classList.remove('btn-active');
         stopGifAnimation();
     }
-    updatePreview();
 }
 
 async function stepGifFrame(direction) {
@@ -633,7 +669,7 @@ async function stepGifFrame(direction) {
 
     if (!frames || frames.length === 0) return;
 
-    // Pause animation when frame stepping without triggering asynchronous race conditions
+    // Pause animation when stepping frames
     if (isAnimated) {
         isAnimated = false;
         const btn = document.getElementById('btn-animate');
