@@ -1,5 +1,6 @@
 import './style.css';
 import {
+    GetInitialTarget,
     GetDrives,
     GetDirectories,
     GetFilesInDirectory,
@@ -33,8 +34,9 @@ let isDragging = false;
 let startDragX = 0;
 let startDragY = 0;
 
-// View Mode
+// View Mode & Fitting Mode
 let isFullScreen = false;
+let fullscreenFitMode = 'screen'; // 'screen' (/), 'actual' (*), 'width' (1), 'height' (3)
 
 // Directory Tree State
 let treeExpandedPaths = new Set();
@@ -185,6 +187,25 @@ function bindEvents() {
     // Init Splitter Dragging & Position Restoring
     initSplitters();
 
+    // Drag and drop setup for files/folders dropped onto app window
+    window.addEventListener('dragover', (e) => e.preventDefault());
+    window.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            const droppedFile = e.dataTransfer.files[0];
+            if (droppedFile.path) {
+                handleTargetPath(droppedFile.path);
+            }
+        }
+    });
+
+    // Listen for Wails runtime file drop event if emitted
+    if (window.runtime && window.runtime.EventsOn) {
+        window.runtime.EventsOn('file-dropped', (path) => {
+            if (path) handleTargetPath(path);
+        });
+    }
+
     // Mouse Zoom & Pan strictly in Full Screen Overlay
     const fsOverlay = document.getElementById('fullscreen-overlay');
 
@@ -211,6 +232,29 @@ function getActiveAllowedTypes() {
     return allowed;
 }
 
+// Process CLI Target / Dropped Path
+async function handleTargetPath(pathStr) {
+    try {
+        const target = await GetInitialTarget(pathStr || '');
+        if (target && target.directory) {
+            await navigateToFolder(target.directory);
+            if (target.isFile && target.fileName) {
+                const targetIdx = files.findIndex(f => f.name.toLowerCase() === target.fileName.toLowerCase());
+                if (targetIdx >= 0) {
+                    highlightedIndex = targetIdx;
+                    renderThumbnails();
+                    updatePreview();
+                    updateStatusBar();
+                }
+            }
+            return true;
+        }
+    } catch (err) {
+        console.error('Failed to resolve target path:', err);
+    }
+    return false;
+}
+
 // Drives & Initial Load
 async function loadDrives() {
     try {
@@ -218,7 +262,8 @@ async function loadDrives() {
         const driveSelect = document.getElementById('drive-select');
         driveSelect.innerHTML = drives.map(d => `<option value="${escapeHtml(d.path)}">${escapeHtml(d.label)}</option>`).join('');
 
-        if (drives.length > 0) {
+        const handled = await handleTargetPath('');
+        if (!handled && drives.length > 0) {
             driveSelect.value = drives[0].path;
             navigateToFolder(drives[0].path);
         }
@@ -606,7 +651,7 @@ async function stepGifFrame(direction) {
     if (isFullScreen && fsImgEl) fsImgEl.src = frameData;
 }
 
-// Navigation (Next / Prev)
+// Navigation (Next / Prev / Home / End)
 function navigateFile(direction) {
     if (files.length === 0) return;
 
@@ -631,6 +676,28 @@ function navigateFile(direction) {
     } else {
         // Cycle all visible files
         highlightedIndex = (highlightedIndex + direction + files.length) % files.length;
+    }
+
+    resetZoom();
+    renderThumbnails();
+    updatePreview();
+    updateStatusBar();
+}
+
+function navigateToBoundaryFile(position) {
+    if (files.length === 0) return;
+
+    const selectedIndices = [];
+    files.forEach((f, idx) => {
+        if (selectedPaths.has(f.path)) {
+            selectedIndices.push(idx);
+        }
+    });
+
+    if (selectedIndices.length > 0) {
+        highlightedIndex = (position === 'first') ? selectedIndices[0] : selectedIndices[selectedIndices.length - 1];
+    } else {
+        highlightedIndex = (position === 'first') ? 0 : files.length - 1;
     }
 
     resetZoom();
@@ -732,10 +799,12 @@ function toggleFullScreen() {
     isFullScreen = !isFullScreen;
     const overlay = document.getElementById('fullscreen-overlay');
     if (isFullScreen) {
+        fullscreenFitMode = 'screen';
+        resetZoom();
         overlay.style.display = 'flex';
         updatePreview();
         updateFsInfo();
-        // Request browser window / element full screen if supported
+        applyFullscreenFitMode();
         if (document.documentElement.requestFullscreen) {
             document.documentElement.requestFullscreen().catch(() => {});
         } else if (document.documentElement.webkitRequestFullscreen) {
@@ -749,6 +818,20 @@ function toggleFullScreen() {
             document.webkitExitFullscreen().catch(() => {});
         }
     }
+}
+
+function setFullscreenFitMode(mode) {
+    fullscreenFitMode = mode;
+    resetZoom();
+    applyFullscreenFitMode();
+}
+
+function applyFullscreenFitMode() {
+    const fsImgEl = document.getElementById('fullscreen-image');
+    if (!fsImgEl) return;
+
+    fsImgEl.classList.remove('fit-screen', 'fit-actual', 'fit-width', 'fit-height');
+    fsImgEl.classList.add(`fit-${fullscreenFitMode}`);
 }
 
 // Listen for native escape / fullscreen change events
@@ -872,15 +955,21 @@ function handleGlobalKeyDown(e) {
         return;
     }
 
-    // Enter key: navigate into folder if highlighted item is a directory
+    // Enter key: Toggle full screen or navigate into folder
     if (e.key === 'Enter') {
-        if (!isFullScreen && highlightedIndex >= 0 && highlightedIndex < files.length) {
+        e.preventDefault();
+        if (isFullScreen) {
+            toggleFullScreen();
+            return;
+        }
+        if (highlightedIndex >= 0 && highlightedIndex < files.length) {
             const file = files[highlightedIndex];
             if (file && file.isDirectory) {
-                e.preventDefault();
                 navigateToFolder(file.path);
-                return;
+            } else if (file) {
+                toggleFullScreen();
             }
+            return;
         }
     }
 
@@ -915,8 +1004,29 @@ function handleGlobalKeyDown(e) {
         return;
     }
 
-    // Fullscreen Mode Specific Keys: Zoom and Panning with Arrows/Keys
+    // Fullscreen Mode Specific Keys: Zoom, Fit Modes (/ * 1 3), and Panning
     if (isFullScreen) {
+        if (e.key === '/') {
+            e.preventDefault();
+            setFullscreenFitMode('screen');
+            return;
+        }
+        if (e.key === '*') {
+            e.preventDefault();
+            setFullscreenFitMode('actual');
+            return;
+        }
+        if (e.key === '1') {
+            e.preventDefault();
+            setFullscreenFitMode('width');
+            return;
+        }
+        if (e.key === '3') {
+            e.preventDefault();
+            setFullscreenFitMode('height');
+            return;
+        }
+
         if (e.key === '+' || e.key === '=') {
             e.preventDefault();
             zoomLevel = Math.min(5.0, zoomLevel + 0.2);
@@ -925,7 +1035,7 @@ function handleGlobalKeyDown(e) {
         }
         if (e.key === '-' || e.key === '_') {
             e.preventDefault();
-            zoomLevel = Math.max(1.0, zoomLevel - 0.2);
+            zoomLevel = Math.max(0.5, zoomLevel - 0.2);
             clampAndApplyPan();
             return;
         }
@@ -958,6 +1068,18 @@ function handleGlobalKeyDown(e) {
                 return;
             }
         }
+    }
+
+    // Home / End Keys: Move to first / last image
+    if (e.key === 'Home') {
+        e.preventDefault();
+        navigateToBoundaryFile('first');
+        return;
+    }
+    if (e.key === 'End') {
+        e.preventDefault();
+        navigateToBoundaryFile('last');
+        return;
     }
 
     // PageUp / PageDown Keys: Always navigate next/prev file

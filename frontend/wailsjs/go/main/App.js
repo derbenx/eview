@@ -1,6 +1,10 @@
 // @ts-check
 // Hand-written or generated JS bindings for App methods
 
+export function GetInitialTarget(arg1) {
+    return window['go']['main']['App']['GetInitialTarget'](arg1);
+}
+
 export function GetDrives() {
     return window['go']['main']['App']['GetDrives']();
 }

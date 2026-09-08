@@ -72,3 +72,34 @@ func TestRenameFile(t *testing.T) {
 		t.Errorf("File at new path does not exist")
 	}
 }
+
+func TestGetInitialTarget(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "eview_test_cli")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	testFile := filepath.Join(tmpDir, "image.png")
+	os.WriteFile(testFile, []byte("png"), 0644)
+
+	app := NewApp()
+
+	// Test folder argument
+	targetDir, err := app.GetInitialTarget(tmpDir)
+	if err != nil {
+		t.Fatalf("GetInitialTarget folder failed: %v", err)
+	}
+	if targetDir.IsFile || targetDir.Directory != tmpDir {
+		t.Errorf("Unexpected folder target: %+v", targetDir)
+	}
+
+	// Test file argument
+	targetFile, err := app.GetInitialTarget(testFile)
+	if err != nil {
+		t.Fatalf("GetInitialTarget file failed: %v", err)
+	}
+	if !targetFile.IsFile || targetFile.Directory != tmpDir || targetFile.FileName != "image.png" {
+		t.Errorf("Unexpected file target: %+v", targetFile)
+	}
+}

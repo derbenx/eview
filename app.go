@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"image"
-	_ "image/gif"
 	"image/gif"
 	_ "image/jpeg"
 	"image/png"
@@ -23,12 +22,54 @@ import (
 
 // App struct
 type App struct {
-	ctx context.Context
+	ctx        context.Context
+	initialArg string
+}
+
+// TargetInfo represents parsed CLI or dropped path target
+type TargetInfo struct {
+	Directory string `json:"directory"`
+	FileName  string `json:"fileName"`
+	IsFile    bool   `json:"isFile"`
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
 	return &App{}
+}
+
+// GetInitialTarget returns target info based on initialArg or dropped path
+func (a *App) GetInitialTarget(targetPath string) (*TargetInfo, error) {
+	if targetPath == "" {
+		targetPath = a.initialArg
+	}
+
+	if targetPath == "" {
+		return &TargetInfo{}, nil
+	}
+
+	absPath, err := filepath.Abs(targetPath)
+	if err != nil {
+		absPath = targetPath
+	}
+
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return nil, fmt.Errorf("path does not exist: %w", err)
+	}
+
+	if info.IsDir() {
+		return &TargetInfo{
+			Directory: absPath,
+			IsFile:    false,
+		}, nil
+	}
+
+	return &TargetInfo{
+		Directory: filepath.Dir(absPath),
+		FileName:  filepath.Base(absPath),
+		IsFile:    true,
+	}, nil
 }
 
 // startup is called when the app starts. The context is saved

@@ -367,6 +367,39 @@ html, body {
     width: auto;
     height: auto;
     object-fit: contain;
+    transition: transform 0.1s ease-out;
+}
+
+.fullscreen-overlay img.fit-screen {
+    max-width: 100%;
+    max-height: 100%;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+}
+
+.fullscreen-overlay img.fit-actual {
+    max-width: none !important;
+    max-height: none !important;
+    width: auto !important;
+    height: auto !important;
+    object-fit: none !important;
+}
+
+.fullscreen-overlay img.fit-width {
+    width: 100vw !important;
+    max-width: none !important;
+    max-height: none !important;
+    height: auto !important;
+    object-fit: fill !important;
+}
+
+.fullscreen-overlay img.fit-height {
+    height: 100vh !important;
+    max-width: none !important;
+    max-height: none !important;
+    width: auto !important;
+    object-fit: fill !important;
 }
 
 .preview-image:active {
